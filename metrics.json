@@ -1,0 +1,26 @@
+{
+  "correlations_raw": [
+    -0.27908171666471004,
+    -0.49029940723002524,
+    -0.04580278161232226
+  ],
+  "correlations_aligned": [
+    0.6429623822411418,
+    0.42180387589130003,
+    0.20887805652150876
+  ],
+  "mean_correlation_raw": -0.27172796850235253,
+  "mean_correlation_aligned": 0.42454810488465017,
+  "mse_raw": 0.11356697597244621,
+  "mse_aligned": 0.05259965810571072,
+  "simplex_distance_raw": 0.8551078698375407,
+  "simplex_distance_aligned": 0.5318248927690359,
+  "alignment_perm": [
+    1,
+    2,
+    0
+  ],
+  "final_total_loss": 1343.4474487304688,
+  "final_recon_loss": 1334.6121978759766,
+  "final_kl_loss": 8.835247159004211
+}
