@@ -481,10 +481,7 @@ def plot_archetype_heatmap(
         if n_cell_clusters is None:
             n_cell_clusters = min(n_archetypes, 10)
         cell_labels_ordered = fcluster(cell_linkage, n_cell_clusters, criterion="maxclust")
-        cell_labels_ordered = cell_labels_ordered[
-            np.argsort(np.argsort(cell_order))
-        ]  # Reorder
-        cell_labels_ordered = cell_labels_ordered[np.argsort(cell_order)]
+        cell_labels_ordered = cell_labels_ordered[cell_order]
     else:
         cell_labels_ordered = None
 

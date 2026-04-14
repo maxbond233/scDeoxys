@@ -182,7 +182,7 @@ class Trainer:
         # Create DataLoader
         dataset = torch.utils.data.TensorDataset(x_train)
         data_loader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=True
+            dataset, batch_size=batch_size, shuffle=True, drop_last=True
         )
 
         # Training loop

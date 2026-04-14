@@ -153,6 +153,12 @@ def generate_swiss_roll_simplex(
         remaining coordinates (height). Manifold-preservation metrics (kNN,
         trustworthiness, continuity) will be unreliable for K>3.
     """
+    if n_archetypes < 2:
+        raise ValueError(
+            f"n_archetypes must be >= 2, got {n_archetypes}. "
+            "Archetypal analysis requires at least 2 archetypes."
+        )
+
     if seed is not None:
         np.random.seed(seed)
         torch.manual_seed(seed)
