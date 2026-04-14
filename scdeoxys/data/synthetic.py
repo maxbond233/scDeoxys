@@ -31,17 +31,20 @@ def generate_archetypal_profiles(n_genes, n_archetypes, seed=None):
 
     archetypes = []
     genes_per_archetype = n_genes // n_archetypes
+    remainder = n_genes % n_archetypes
 
+    gene_idx = 0
     for k in range(n_archetypes):
         profile = np.zeros(n_genes)
 
-        # Each archetype has high expression in a subset of genes
-        start_idx = k * genes_per_archetype
-        end_idx = start_idx + genes_per_archetype
+        # Distribute remainder genes round-robin to first archetypes
+        n_marker = genes_per_archetype + (1 if k < remainder else 0)
+        start_idx = gene_idx
+        end_idx = gene_idx + n_marker
 
         # High expression genes for this archetype
         profile[start_idx:end_idx] = np.random.lognormal(
-            mean=3.0, sigma=0.5, size=genes_per_archetype
+            mean=3.0, sigma=0.5, size=n_marker
         )
 
         # Low baseline expression for other genes
@@ -51,6 +54,7 @@ def generate_archetypal_profiles(n_genes, n_archetypes, seed=None):
         )
 
         archetypes.append(profile)
+        gene_idx = end_idx
 
     return np.array(archetypes)
 
@@ -140,6 +144,14 @@ def generate_swiss_roll_simplex(
             - obsm["X_swiss_roll_3d"]: 3D Swiss Roll coordinates, shape (n_cells, 3)
             - obs["color_param"]: Color parameter for plotting, shape (n_cells,)
             - uns["scdeoxys_synthetic"]: Generation metadata
+
+    Note:
+        The Swiss Roll geometry has 2 intrinsic dimensions, which faithfully
+        encodes K=3 archetypes (a 2D simplex). For K>3, the base expression
+        z_true @ archetypes still uses all K coordinates, but the 3D manifold
+        structure only reflects the first coordinate (angle) and the mean of
+        remaining coordinates (height). Manifold-preservation metrics (kNN,
+        trustworthiness, continuity) will be unreliable for K>3.
     """
     if seed is not None:
         np.random.seed(seed)
@@ -163,7 +175,7 @@ def generate_swiss_roll_simplex(
     angle = 1.5 * np.pi * (1 + 2 * t)  # Angle increases with t
     x = angle * np.cos(angle)
     y = angle * np.sin(angle)
-    z = 10 * z_true[:, 1]  # Use second simplex coordinate for height
+    z = 10 * z_true[:, 1:].mean(axis=1)  # Use all remaining simplex coords for height
 
     swiss_roll_3d = np.column_stack([x, y, z])
 

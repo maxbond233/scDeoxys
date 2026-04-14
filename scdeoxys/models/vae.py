@@ -100,19 +100,21 @@ class Decoder(nn.Module):
         # Learnable dispersion parameter (one per gene)
         self.theta_log = nn.Parameter(torch.zeros(n_genes))
 
-    def forward(self, z):
+    def forward(self, z, library_size):
         """
         Decode simplex coordinates to NB parameters.
 
         Args:
             z: Simplex coordinates, shape (batch_size, n_archetypes)
+            library_size: Per-cell total counts, shape (batch_size, 1)
 
         Returns:
-            mu: Mean parameter, shape (batch_size, n_genes)
+            mu: Mean parameter (library-scaled), shape (batch_size, n_genes)
             theta: Dispersion parameter, shape (n_genes,)
         """
         h = self.hidden(z)
-        mu = F.softplus(self.mu_output(h))
+        rho = F.softplus(self.mu_output(h))
+        mu = rho * library_size
         theta = F.softplus(self.theta_log)
         return mu, theta
 
@@ -144,19 +146,40 @@ class ParetoVAE(nn.Module):
         """
         Forward pass through the VAE.
 
+        Computes library size from raw counts, log-normalizes input for the
+        encoder, and scales decoder output by library size.
+
         Args:
             x: Gene expression counts, shape (batch_size, n_genes)
 
         Returns:
-            mu_recon: Reconstructed mean, shape (batch_size, n_genes)
+            mu_recon: Reconstructed mean (library-scaled), shape (batch_size, n_genes)
             theta: Dispersion parameter, shape (n_genes,)
             z: Simplex coordinates, shape (batch_size, n_archetypes)
             mu_latent: Mean of latent distribution, shape (batch_size, n_archetypes)
             logvar_latent: Log variance of latent distribution, shape (batch_size, n_archetypes)
         """
-        mu_latent, logvar_latent, z = self.encoder(x)
-        mu_recon, theta = self.decoder(z)
+        library_size = x.sum(dim=1, keepdim=True)
+        x_norm = torch.log1p(x / (library_size + 1e-8) * 1e4)
+        mu_latent, logvar_latent, z = self.encoder(x_norm)
+        mu_recon, theta = self.decoder(z, library_size)
         return mu_recon, theta, z, mu_latent, logvar_latent
+
+    def encode(self, x):
+        """
+        Encode raw counts to simplex coordinates with proper normalization.
+
+        Args:
+            x: Gene expression counts, shape (batch_size, n_genes)
+
+        Returns:
+            mu: Mean of latent distribution, shape (batch_size, n_archetypes)
+            logvar: Log variance, shape (batch_size, n_archetypes)
+            z: Simplex coordinates, shape (batch_size, n_archetypes)
+        """
+        library_size = x.sum(dim=1, keepdim=True)
+        x_norm = torch.log1p(x / (library_size + 1e-8) * 1e4)
+        return self.encoder(x_norm)
 
     def loss(self, x, mu_recon, theta, z, mu_latent, logvar_latent, beta=1.0, free_bits=0.0, eps=1e-8):
         """

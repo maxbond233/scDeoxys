@@ -5,6 +5,8 @@ Implements the Trainer class for training ParetoVAE models with
 beta warmup and loss monitoring.
 """
 
+import copy
+
 import torch
 import numpy as np
 import anndata as ad
@@ -166,6 +168,15 @@ class Trainer:
             history: Dictionary of training metrics over epochs
         """
         x_train = self._get_counts(adata)
+
+        # Reset history for this training run
+        self.history = {
+            "total_loss": [],
+            "recon_loss": [],
+            "kl_loss": [],
+            "beta": [],
+        }
+
         x_train = torch.tensor(x_train, dtype=torch.float32)
 
         # Create DataLoader
@@ -196,7 +207,7 @@ class Trainer:
                 })
 
         scdeoxys_meta = adata.uns.get("scdeoxys", {})
-        scdeoxys_meta["history"] = self.history
+        scdeoxys_meta["history"] = copy.deepcopy(self.history)
         scdeoxys_meta["training_params"] = {
             "n_epochs": n_epochs,
             "batch_size": batch_size,
@@ -231,7 +242,7 @@ class Trainer:
         x = torch.tensor(x, dtype=torch.float32).to(self.device)
 
         with torch.no_grad():
-            mu_latent, logvar_latent, z = self.model.encoder(x)
+            mu_latent, logvar_latent, z = self.model.encode(x)
 
         adata.obsm["X_scdeoxys"] = z.cpu().numpy()
         return adata
