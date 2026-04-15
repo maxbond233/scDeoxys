@@ -1,6 +1,7 @@
 """Smoke tests for scDeoxys core functionality."""
 
 import numpy as np
+import torch
 import pytest
 import matplotlib
 matplotlib.use("Agg")
@@ -88,3 +89,79 @@ class TestSyntheticData:
         # Every gene should be a high-expression marker for exactly one archetype
         max_per_gene = profiles.max(axis=0)
         assert (max_per_gene > 5.0).all()
+
+
+class TestFreeBits:
+    def test_free_bits_floor(self, small_adata):
+        """KL loss should be at least n_archetypes * free_bits with corrected implementation."""
+        model = ParetoVAE(n_genes=20, n_archetypes=3, hidden_dims=[32, 16])
+        free_bits = 1.0
+        trainer = Trainer(model, learning_rate=1e-3, beta_warmup_epochs=1, free_bits=free_bits)
+        trainer.train(small_adata, n_epochs=3, batch_size=25, verbose=False)
+        # KL is sum over dims, so floor is n_archetypes * free_bits
+        final_kl = trainer.history["kl_loss"][-1]
+        assert final_kl >= 3 * free_bits * 0.9  # small tolerance
+
+    def test_free_bits_zero_no_floor(self, small_adata):
+        """With free_bits=0, KL can go arbitrarily low."""
+        model = ParetoVAE(n_genes=20, n_archetypes=3, hidden_dims=[32, 16])
+        trainer = Trainer(model, learning_rate=1e-3, beta_warmup_epochs=1, free_bits=0.0)
+        trainer.train(small_adata, n_epochs=3, batch_size=25, verbose=False)
+        # Just verify it runs without error
+        assert len(trainer.history["kl_loss"]) == 3
+
+
+class TestCyclicalAnnealing:
+    def test_cyclical_beta_pattern(self):
+        """Cyclical beta should reset at cycle boundaries."""
+        model = ParetoVAE(n_genes=20, n_archetypes=3, hidden_dims=[32, 16])
+        trainer = Trainer(model, n_cycles=4, annealing_type="cyclical")
+        n_epochs = 100
+        betas = [trainer.get_beta(e, n_epochs) for e in range(n_epochs)]
+        # At start of each cycle, beta should be near beta_min
+        cycle_length = n_epochs / 4
+        for c in range(4):
+            start_epoch = int(c * cycle_length)
+            assert betas[start_epoch] == pytest.approx(0.0, abs=0.05)
+        # At midpoint of each cycle, beta should be near beta_max
+        for c in range(4):
+            mid_epoch = int(c * cycle_length + cycle_length * 0.5)
+            if mid_epoch < n_epochs:
+                assert betas[mid_epoch] == pytest.approx(1.0, abs=0.05)
+
+    def test_linear_fallback(self):
+        """With annealing_type='linear', should use original warmup."""
+        model = ParetoVAE(n_genes=20, n_archetypes=3, hidden_dims=[32, 16])
+        trainer = Trainer(model, beta_warmup_epochs=10, annealing_type="linear")
+        assert trainer.get_beta(0) == 0.0
+        assert trainer.get_beta(5) == pytest.approx(0.5, abs=0.01)
+        assert trainer.get_beta(10) == 1.0
+        assert trainer.get_beta(20) == 1.0
+
+
+class TestDecoderArchitecture:
+    def test_decoder_uses_layernorm(self):
+        """Decoder should use LayerNorm, not BatchNorm."""
+        import torch.nn as nn
+        model = ParetoVAE(n_genes=20, n_archetypes=3, hidden_dims=[32, 16])
+        decoder_modules = list(model.decoder.hidden.modules())
+        has_layernorm = any(isinstance(m, nn.LayerNorm) for m in decoder_modules)
+        has_batchnorm = any(isinstance(m, nn.BatchNorm1d) for m in decoder_modules)
+        assert has_layernorm
+        assert not has_batchnorm
+
+    def test_encoder_keeps_batchnorm(self):
+        """Encoder should still use BatchNorm."""
+        import torch.nn as nn
+        model = ParetoVAE(n_genes=20, n_archetypes=3, hidden_dims=[32, 16])
+        encoder_modules = list(model.encoder.hidden.modules())
+        has_batchnorm = any(isinstance(m, nn.BatchNorm1d) for m in encoder_modules)
+        assert has_batchnorm
+
+    def test_decoder_dropout_param(self):
+        """decoder_dropout parameter should control decoder dropout rate."""
+        model = ParetoVAE(n_genes=20, n_archetypes=3, hidden_dims=[32, 16], decoder_dropout=0.5)
+        import torch.nn as nn
+        dropouts = [m for m in model.decoder.hidden.modules() if isinstance(m, nn.Dropout)]
+        assert len(dropouts) > 0
+        assert all(d.p == 0.5 for d in dropouts)

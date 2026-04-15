@@ -26,7 +26,7 @@ class Trainer:
         beta_warmup_epochs: Number of epochs for beta warmup
         beta_min: Starting beta value for warmup (default 0.0)
         beta_max: Final beta value after warmup (default 1.0)
-        free_bits: Minimum KL per dimension to prevent posterior collapse (default 0.1)
+        free_bits: Minimum KL per dimension to prevent posterior collapse (default 1.0)
         device: Device to train on ('cuda' or 'cpu')
     """
 
@@ -37,7 +37,9 @@ class Trainer:
         beta_warmup_epochs=50,
         beta_min=0.0,
         beta_max=1.0,
-        free_bits=0.1,
+        free_bits=1.0,
+        n_cycles=4,
+        annealing_type="cyclical",
         device=None,
     ):
         self.model = model
@@ -46,6 +48,8 @@ class Trainer:
         self.beta_min = beta_min
         self.beta_max = beta_max
         self.free_bits = free_bits
+        self.n_cycles = n_cycles
+        self.annealing_type = annealing_type
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -65,38 +69,51 @@ class Trainer:
             "beta": [],
         }
 
-    def get_beta(self, epoch):
+    def get_beta(self, epoch, n_epochs=None):
         """
         Compute beta value with warmup schedule.
 
-        Beta increases linearly from beta_min to beta_max over warmup_epochs.
+        Supports two modes:
+        - "cyclical": Multiple warmup cycles (Fu et al., 2019). Beta ramps
+          from beta_min to beta_max in the first half of each cycle, then
+          stays at beta_max for the second half. Requires n_epochs.
+        - "linear": Single linear warmup from beta_min to beta_max over
+          beta_warmup_epochs, then constant. (Original behavior.)
 
         Args:
             epoch: Current epoch number
+            n_epochs: Total number of epochs (required for cyclical mode)
 
         Returns:
             beta: Beta value for this epoch
         """
-        if epoch < self.beta_warmup_epochs:
-            progress = epoch / self.beta_warmup_epochs
+        if self.annealing_type == "cyclical" and n_epochs is not None:
+            cycle_length = n_epochs / self.n_cycles
+            cycle_pos = epoch % cycle_length
+            progress = min(cycle_pos / (cycle_length * 0.5), 1.0)
             beta = self.beta_min + (self.beta_max - self.beta_min) * progress
         else:
-            beta = self.beta_max
+            if epoch < self.beta_warmup_epochs:
+                progress = epoch / self.beta_warmup_epochs
+                beta = self.beta_min + (self.beta_max - self.beta_min) * progress
+            else:
+                beta = self.beta_max
         return beta
 
-    def train_epoch(self, data_loader, epoch):
+    def train_epoch(self, data_loader, epoch, n_epochs=None):
         """
         Train for one epoch.
 
         Args:
             data_loader: DataLoader for training data
             epoch: Current epoch number
+            n_epochs: Total number of epochs (for cyclical annealing)
 
         Returns:
             metrics: Dictionary of average metrics for this epoch
         """
         self.model.train()
-        beta = self.get_beta(epoch)
+        beta = self.get_beta(epoch, n_epochs)
 
         total_losses = []
         recon_losses = []
@@ -189,7 +206,7 @@ class Trainer:
         iterator = tqdm(range(n_epochs), desc="Training") if verbose else range(n_epochs)
 
         for epoch in iterator:
-            metrics = self.train_epoch(data_loader, epoch)
+            metrics = self.train_epoch(data_loader, epoch, n_epochs)
 
             # Record metrics
             self.history["total_loss"].append(metrics["total_loss"])
@@ -216,6 +233,8 @@ class Trainer:
             "beta_min": self.beta_min,
             "beta_max": self.beta_max,
             "free_bits": self.free_bits,
+            "n_cycles": self.n_cycles,
+            "annealing_type": self.annealing_type,
             "device": str(self.device),
         }
         scdeoxys_meta["model_params"] = {

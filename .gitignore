@@ -2,6 +2,7 @@
 docs/
 .cluade/
 AGENTS.md
+data/
 
 # Python
 __pycache__/

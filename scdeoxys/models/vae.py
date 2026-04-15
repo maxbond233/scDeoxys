@@ -81,7 +81,7 @@ class Decoder(nn.Module):
         Simplex (n_archetypes) → Hidden layers → NB params (μ, θ)
     """
 
-    def __init__(self, n_archetypes, n_genes, hidden_dims=[128, 256]):
+    def __init__(self, n_archetypes, n_genes, hidden_dims=[128, 256], dropout=0.3):
         super().__init__()
 
         layers = []
@@ -89,9 +89,9 @@ class Decoder(nn.Module):
 
         for hidden_dim in hidden_dims:
             layers.append(nn.Linear(input_dim, hidden_dim))
-            layers.append(nn.BatchNorm1d(hidden_dim))
+            layers.append(nn.LayerNorm(hidden_dim))
             layers.append(nn.ReLU())
-            layers.append(nn.Dropout(0.1))
+            layers.append(nn.Dropout(dropout))
             input_dim = hidden_dim
 
         self.hidden = nn.Sequential(*layers)
@@ -132,7 +132,7 @@ class ParetoVAE(nn.Module):
         hidden_dims: Hidden layer dimensions for encoder/decoder
     """
 
-    def __init__(self, n_genes, n_archetypes, hidden_dims=[256, 128]):
+    def __init__(self, n_genes, n_archetypes, hidden_dims=[256, 128], decoder_dropout=0.3):
         super().__init__()
 
         self.n_genes = n_genes
@@ -140,7 +140,7 @@ class ParetoVAE(nn.Module):
 
         self.encoder = Encoder(n_genes, n_archetypes, hidden_dims)
         decoder_hidden = hidden_dims[::-1]
-        self.decoder = Decoder(n_archetypes, n_genes, decoder_hidden)
+        self.decoder = Decoder(n_archetypes, n_genes, decoder_hidden, dropout=decoder_dropout)
 
     def forward(self, x):
         """
@@ -206,7 +206,7 @@ class ParetoVAE(nn.Module):
             recon_loss: Reconstruction loss
             kl_loss: KL divergence loss
         """
-        # Reconstruction loss: negative log-likelihood
+        # Reconstruction loss: negative log-likelihood (sum over genes, mean over batch)
         log_prob = NegativeBinomial.log_prob(x, mu_recon, theta, eps)
         recon_loss = -log_prob.sum(dim=-1).mean()
 
@@ -214,12 +214,21 @@ class ParetoVAE(nn.Module):
         # KL_dim = 0.5 * (sigma^2 + mu^2 - 1 - log(sigma^2))
         kl_per_dim = 0.5 * (logvar_latent.exp() + mu_latent.pow(2) - 1 - logvar_latent)
 
-        # Apply free bits: ensure minimum KL per dimension
+        # Apply free bits: average over batch first, then clamp per dimension
+        # (Kingma et al., 2016 formulation)
         if free_bits > 0:
-            kl_per_dim = torch.clamp(kl_per_dim, min=free_bits)
+            kl_per_dim_mean = kl_per_dim.mean(dim=0)  # (n_archetypes,)
+            kl_per_dim_mean = torch.clamp(kl_per_dim_mean, min=free_bits)
+            kl_loss = kl_per_dim_mean.sum()
+        else:
+            kl_loss = kl_per_dim.sum(dim=-1).mean()
 
-        kl_loss = kl_per_dim.sum(dim=-1).mean()
+        # Scale beta by n_genes/n_archetypes to balance recon (sum over genes)
+        # and KL (sum over archetypes) dimensions
+        n_genes = x.shape[1]
+        n_latent = mu_latent.shape[1]
+        beta_scaled = beta * (n_genes / n_latent)
 
-        total_loss = recon_loss + beta * kl_loss
+        total_loss = recon_loss + beta_scaled * kl_loss
 
         return total_loss, recon_loss, kl_loss

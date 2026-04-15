@@ -13,6 +13,20 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
 
 
+def _is_discrete_labels(labels):
+    """Check if labels are discrete (string/categorical) rather than numeric."""
+    arr = np.asarray(labels)
+    if arr.dtype.kind in ('U', 'S', 'O'):
+        return True
+    try:
+        import pandas as pd
+        if hasattr(labels, 'dtype') and isinstance(labels.dtype, pd.CategoricalDtype):
+            return True
+    except ImportError:
+        pass
+    return False
+
+
 def plot_simplex_projection(z, labels=None, title="Simplex Projection", ax=None, cmap=None, show_colorbar=True):
     """
     Plot simplex coordinates in 2D.
@@ -56,9 +70,17 @@ def plot_simplex_projection(z, labels=None, title="Simplex Projection", ax=None,
         # Plot points
         if labels is not None:
             use_cmap = cmap if cmap is not None else "tab10"
-            scatter = ax.scatter(x, y, c=labels, cmap=use_cmap, alpha=0.6, s=20)
-            if show_colorbar:
-                plt.colorbar(scatter, ax=ax, label="Value")
+            if _is_discrete_labels(labels):
+                unique_labels = np.unique(labels)
+                colors = plt.cm.get_cmap(use_cmap)(np.linspace(0, 1, len(unique_labels)))
+                for i, label in enumerate(unique_labels):
+                    mask = np.asarray(labels) == label
+                    ax.scatter(x[mask], y[mask], c=[colors[i]], label=str(label), alpha=0.6, s=20)
+                ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=8)
+            else:
+                scatter = ax.scatter(x, y, c=labels, cmap=use_cmap, alpha=0.6, s=20)
+                if show_colorbar:
+                    plt.colorbar(scatter, ax=ax, label="Value")
         else:
             ax.scatter(x, y, alpha=0.6, s=20, color="blue")
 
@@ -107,9 +129,17 @@ def plot_simplex_projection(z, labels=None, title="Simplex Projection", ax=None,
         # Plot cell points
         if labels is not None:
             use_cmap = cmap if cmap is not None else "tab10"
-            scatter = ax.scatter(x, y, c=labels, cmap=use_cmap, alpha=0.6, s=20, zorder=3)
-            if show_colorbar:
-                plt.colorbar(scatter, ax=ax, label="Value")
+            if _is_discrete_labels(labels):
+                unique_labels = np.unique(labels)
+                colors = plt.cm.get_cmap(use_cmap)(np.linspace(0, 1, len(unique_labels)))
+                for i, label in enumerate(unique_labels):
+                    mask = np.asarray(labels) == label
+                    ax.scatter(x[mask], y[mask], c=[colors[i]], label=str(label), alpha=0.6, s=20, zorder=3)
+                ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=8)
+            else:
+                scatter = ax.scatter(x, y, c=labels, cmap=use_cmap, alpha=0.6, s=20, zorder=3)
+                if show_colorbar:
+                    plt.colorbar(scatter, ax=ax, label="Value")
         else:
             ax.scatter(x, y, alpha=0.6, s=20, color="blue", zorder=3)
 
